@@ -354,7 +354,7 @@ async def generate_image_openrouter(prompt, api_keys, model="google/gemini-2.5-f
                                             if await save_base64_image(base64_data, "png"):
                                                 logger.info(f"API密钥 #{current_index} 成功生成图像 (base64格式)")
                                                 return await get_saved_image_info()
-                                
+
                                 # 处理Gemini格式的响应
                                 elif "choices" in data:
                                     choice = data["choices"][0]
@@ -395,6 +395,44 @@ async def generate_image_openrouter(prompt, api_keys, model="google/gemini-2.5-f
                                             if await save_base64_image(base64_string, image_format):
                                                 logger.info(f"API密钥 #{current_index} 成功生成图像")
                                                 return await get_saved_image_info()
+                                        
+                                        # 新增：查找Markdown格式的图片URL ![](https://example.com/image.png)
+                                        markdown_image_pattern = r"!\[\]\((https?://[^\s]+)\)"
+                                        markdown_matches = re.findall(markdown_image_pattern, content)
+                                        
+                                        if markdown_matches:
+                                            image_url = markdown_matches[0]
+                                            logger.info(f"从Markdown内容中提取到图像URL: {image_url}")
+                                            
+                                            # 下载图像并保存
+                                            async with session.get(image_url) as img_response:
+                                                if img_response.status == 200:
+                                                    # 生成唯一文件名
+                                                    script_dir = Path(__file__).parent.parent
+                                                    images_dir = script_dir / "images"
+                                                    images_dir.mkdir(exist_ok=True)
+                                                    
+                                                    # 先清理旧图像
+                                                    await cleanup_old_images(script_dir)
+                                                    
+                                                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                                    unique_id = str(uuid.uuid4())[:8]
+                                                    image_path = images_dir / f"markdown_image_{timestamp}_{unique_id}.png"
+                                                    
+                                                    async with aiofiles.open(image_path, "wb") as f:
+                                                        await f.write(await img_response.read())
+                                                    
+                                                    # 获取绝对路径
+                                                    abs_path = str(image_path.absolute())
+                                                    file_url = f"file://{abs_path}"
+                                                    
+                                                    # 更新状态
+                                                    await _state.update_saved_image(file_url, str(image_path))
+                                                    
+                                                    logger.info(f"API密钥 #{current_index} 成功生成图像: {abs_path}")
+                                                    return file_url, str(image_path)
+                                                else:
+                                                    logger.error(f"下载Markdown图像失败: {image_url}")
 
                                 logger.info("API调用成功，但未找到图像数据")
                                 # 这种情况也算成功，不需要重试
